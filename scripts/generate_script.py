@@ -6,8 +6,13 @@ Turns a raw headline/summary into:
 
 Keeping this step "in our own words" is what makes the video non-infringing —
 we're reporting on a fact, not republishing anyone's article or footage.
+
+Uses forced tool-use (tool_choice) with a strict JSON schema instead of asking
+Claude to free-write JSON as text. That guarantees every required field is
+always present and correctly typed — the earlier text-based approach
+occasionally omitted a field (e.g. "description") since nothing enforced the
+shape of plain text output.
 """
-import json
 import os
 
 import anthropic
@@ -23,15 +28,40 @@ Rules:
 - The script is spoken aloud, so write for the ear: short sentences, no headers, no bullet points.
 - Target 110-130 words (about 45-55 seconds at a natural reading pace).
 - The title must be accurate to the content — compelling is good, misleading is not.
-- Output ONLY valid JSON, no markdown fences, no commentary, matching this exact shape:
-{
-  "title": "string, <=95 characters, includes a hook, no clickbait that misrepresents the story",
-  "script": "string, the spoken narration only",
-  "description": "string, 2-4 sentences summarizing the story plus one line inviting people to follow for daily recaps",
-  "tags": ["8-12 lowercase keyword tags relevant to this specific story"],
-  "hashtags": ["5-8 hashtags, each starting with #, relevant to this story; always include #shorts"]
+- Call the submit_video_package tool exactly once with the finished package."""
+
+PACKAGE_TOOL = {
+    "name": "submit_video_package",
+    "description": "Submit the finished title, script, description, tags, and hashtags for this video.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "<=95 characters, includes a hook, no clickbait that misrepresents the story",
+            },
+            "script": {
+                "type": "string",
+                "description": "The spoken narration only, 110-130 words, no headers or bullet points",
+            },
+            "description": {
+                "type": "string",
+                "description": "2-4 sentences summarizing the story, plus one line inviting people to follow for daily recaps",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "8-12 lowercase keyword tags relevant to this specific story",
+            },
+            "hashtags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "5-8 hashtags, each starting with #, relevant to this story; always include #shorts",
+            },
+        },
+        "required": ["title", "script", "description", "tags", "hashtags"],
+    },
 }
-"""
 
 
 def generate_script_package(topic: dict, trending_keywords: list[str] | None = None) -> dict:
@@ -40,26 +70,19 @@ def generate_script_package(topic: dict, trending_keywords: list[str] | None = N
     user_prompt = f"""Source headline: {topic['title']}
 Source summary: {topic.get('summary', '(no summary available, work from the headline only)')}
 
-Currently-trending YouTube keywords you may draw from IF genuinely relevant (do not force-fit ones that don't fit this story): {", ".join(trending_keywords) if trending_keywords else "(none provided)"}
-
-Write the JSON package now."""
+Currently-trending YouTube keywords you may draw from IF genuinely relevant (do not force-fit ones that don't fit this story): {", ".join(trending_keywords) if trending_keywords else "(none provided)"}"""
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1000,
         system=SYSTEM_PROMPT,
+        tools=[PACKAGE_TOOL],
+        tool_choice={"type": "tool", "name": "submit_video_package"},
         messages=[{"role": "user", "content": user_prompt}],
     )
 
-    raw_text = "".join(block.text for block in response.content if block.type == "text").strip()
-
-    # Strip stray markdown fences just in case the model adds them
-    if raw_text.startswith("```"):
-        raw_text = raw_text.strip("`")
-        raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text
-        raw_text = raw_text.rsplit("```", 1)[0]
-
-    package = json.loads(raw_text)
+    tool_use_block = next(b for b in response.content if b.type == "tool_use")
+    package = dict(tool_use_block.input)
 
     # Always guarantee #shorts is present regardless of what the model produced
     if not any(h.lower() == "#shorts" for h in package.get("hashtags", [])):
@@ -69,5 +92,7 @@ Write the JSON package now."""
 
 
 if __name__ == "__main__":
+    import json
+
     demo_topic = {"title": "Example headline for a dry run", "summary": "Example summary text."}
     print(json.dumps(generate_script_package(demo_topic), indent=2))
