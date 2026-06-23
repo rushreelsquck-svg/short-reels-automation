@@ -8,11 +8,11 @@ on:
   workflow_dispatch: {}   # lets you click "Run workflow" manually in the Actions tab to test
 
 jobs:
-     build-and-upload:
-       runs-on: ubuntu-latest
-       timeout-minutes: 20
-       permissions:
-         contents: write
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write   # needed so the last step can commit state/used_topics.json back to the repo
 
     steps:
       - name: Checkout repo
