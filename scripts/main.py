@@ -44,9 +44,8 @@ def run():
 
     print("[5/6] Building the video...")
     video_path = str(WORKDIR / "output.mp4")
-    # Use the first few words of the headline as a loose b-roll search term
-    topic_keyword = " ".join(topic["title"].split()[:4])
-    build_video(script_package["script"], audio_path, video_path, topic_keyword=topic_keyword)
+    visual_queries = script_package.get("visual_queries", [])
+    build_video(script_package["script"], audio_path, video_path, visual_queries=visual_queries)
 
     print("[6/6] Uploading to YouTube...")
     final_meta = build_final_metadata(script_package, trending_keywords, topic)
