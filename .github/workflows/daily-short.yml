@@ -8,9 +8,11 @@ on:
   workflow_dispatch: {}   # lets you click "Run workflow" manually in the Actions tab to test
 
 jobs:
-  build-and-upload:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+     build-and-upload:
+       runs-on: ubuntu-latest
+       timeout-minutes: 20
+       permissions:
+         contents: write
 
     steps:
       - name: Checkout repo
