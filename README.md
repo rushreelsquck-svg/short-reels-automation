@@ -21,8 +21,9 @@ status, OAuth publishing) directly affect whether this works at all.
   and hashtags help discovery, they don't manufacture demand.
 - ❌ Does **not** scrape or re-upload anyone else's video/footage. It writes an
   original script about a news event, which is what keeps it copyright-clean.
-- ⚠️ Runs unattended once set up, but **start with `YT_PRIVACY_STATUS=unlisted`**
-  (already the default) and watch a few outputs before flipping it to `public`.
+- ⚠️ Runs unattended once set up. Default mode is `YT_PRIVACY_STATUS=scheduled`,
+  which uploads private and auto-publishes a few hours later — see "Choosing
+  how videos go public" below for what that actually means and the other options.
   YouTube has also tightened policy on mass-produced/repetitive "faceless"
   channels — keep an eye on your channel's monetization status if that matters
   to you, and consider occasionally customizing the format so it doesn't look
@@ -156,7 +157,7 @@ subscription — each video costs roughly a fraction of a cent in API usage.
    | `YT_CLIENT_SECRET` | from Step 1 |
    | `YT_REFRESH_TOKEN` | from Step 2 |
    | `YT_API_KEY` | from Step 1 (optional — enables trending-tag enrichment) |
-   | `PEXELS_API_KEY` | optional, from [pexels.com/api](https://www.pexels.com/api/) for stock b-roll instead of the gradient background |
+   | `PEXELS_API_KEY` | recommended — turns on real stock footage instead of the gradient background (see "Real visuals" below) |
 
 3. (Optional) Drop 2-5 royalty-free mp3s into `assets/music/` and commit them
    — see `assets/music/README.txt` for where to get them legally.
@@ -166,16 +167,60 @@ subscription — each video costs roughly a fraction of a cent in API usage.
 ## Step 5: Test it manually before trusting the schedule
 
 Go to your repo's **Actions** tab → "Daily Trending Short" → **Run workflow**.
-Watch the log. If it succeeds, check the unlisted video on your channel
-before changing anything to public. Common first-run issues:
+Watch the log. If it succeeds, check the video on your channel (YouTube
+Studio → Content, it'll show as private) before trusting later runs. Common
+first-run issues:
 
 - `gTTSError` → usually a transient rate limit from the free TTS endpoint; rerun.
 - `invalid_grant` on upload → refresh token expired (see the 7-day trap above) or wasn't copied correctly.
 - Pexels step silently skipped → fine, it just falls back to the gradient background if no key/clip is found.
 
-Once you're happy with the output, go back to repo Secrets and you can leave
-`YT_PRIVACY_STATUS` as `unlisted` permanently, or change the default in the
-workflow file to `public` once you trust it.
+### Choosing how videos go public
+
+`YT_PRIVACY_STATUS` in the workflow file controls this — three options:
+
+- **`"scheduled"`** (current default): uploads as private, then YouTube
+  automatically flips it to public after `YT_PUBLISH_DELAY_HOURS` (default 3).
+  This is the YouTube API's actual mechanism for scheduling — it requires
+  uploading as private with a `publishAt` timestamp, there's no way around
+  that. **While waiting, the video is private**, not unlisted — not even
+  viewable via a shared link, only by you in YouTube Studio.
+- **`"unlisted"`**: stays unlisted forever until you manually change it in
+  YouTube Studio. No auto-publish, but viewable via direct link immediately.
+- **`"public"`**: goes live immediately, no review window at all.
+
+---
+
+## Real visuals (instead of the gradient background)
+
+By default, the background is a fully synthetic animated gradient — zero
+licensing risk, always works, but plain. To get real stock footage instead:
+
+1. Sign up free at [pexels.com/api](https://www.pexels.com/api/) and grab an API key.
+2. Add it as the `PEXELS_API_KEY` repo secret (see Step 4 above).
+
+That's it — nothing else to configure. Once that key is set, Claude picks 3-4
+short, concrete visual phrases for each story (e.g. "oil refinery", "diplomats
+shaking hands") as part of writing the script, and the video cuts between a
+real clip for each one instead of looping a single background for the whole
+thing. If a specific clip can't be found for a given phrase, that one segment
+quietly falls back to the gradient — the run never breaks because of it.
+
+Pexels' free tier is generous enough that you won't need to think about rate
+limits for a once-a-day video.
+
+---
+
+## Running additional channels
+
+For a second channel, this project's actual setup uses a separate standalone
+repo (same scripts, own credentials, own schedule) rather than running
+multiple workflows out of one repo — simpler to reason about, at the cost of
+applying any future bug fix to each repo separately. To add another channel,
+copy this whole repo into a new one and follow Steps 1-4 again, reusing
+`ANTHROPIC_API_KEY`, `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_API_KEY`, and
+`PEXELS_API_KEY` as-is — only `YT_REFRESH_TOKEN` needs to be new, authorized
+by logging into the new channel's Google account during Step 2.
 
 ---
 
@@ -189,7 +234,10 @@ workflow file to `public` once you trust it.
   keep the same function signature so nothing else needs to change.
 - **Visual style**: `scripts/build_video.py`'s `_make_gradient_background()`
   and `_render_caption_png()` control the look — colors, font, caption box
-  styling are all editable there.
+  styling are all editable there. The number of background clips per video
+  follows however many `visual_queries` Claude returns (3-4 by default) —
+  adjust the count in `generate_script.py`'s system prompt if you want more
+  or fewer cuts.
 - **Schedule**: edit the cron line in `.github/workflows/daily-short.yml`.
   [crontab.guru](https://crontab.guru) helps build the expression.
 
