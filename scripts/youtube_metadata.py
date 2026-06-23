@@ -25,13 +25,15 @@ def _dedupe_preserve_order(items):
 
 
 def build_final_metadata(script_package: dict, trending_keywords: list[str], topic: dict) -> dict:
-    title = script_package["title"][:MAX_TITLE_CHARS]
+    title = script_package.get("title", topic.get("title", "Trending Today"))[:MAX_TITLE_CHARS]
 
-    hashtags = _dedupe_preserve_order(script_package.get("hashtags", []))
+    hashtags = _dedupe_preserve_order(script_package.get("hashtags", ["#shorts"]))
     hashtag_line = " ".join(hashtags)
 
+    description_text = script_package.get("description", "").strip() or script_package.get("script", "").strip()
+
     description_parts = [
-        script_package["description"].strip(),
+        description_text,
         "",
         f"Source story: {topic.get('source', '')}".strip(),
         "",
