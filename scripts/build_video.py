@@ -1,9 +1,12 @@
 """
 build_video.py
 Assembles the final 1080x1920 vertical video:
-  - background: a Pexels stock clip (free, royalty-free, no attribution required)
-    if PEXELS_API_KEY is set and a relevant clip is found, otherwise a fully
-    synthetic animated gradient (zero licensing risk, always works offline)
+  - background: cuts between a few real Pexels stock clips (free, royalty-free,
+    no attribution required) — one per "visual query" Claude picked for this
+    story — if PEXELS_API_KEY is set, otherwise a fully synthetic animated
+    gradient (zero licensing risk, always works offline). Any single clip that
+    can't be found falls back to a gradient for just that segment, so one bad
+    lookup never breaks the whole video.
   - captions: phrase-by-phrase, rendered with Pillow using an open-source
     (OFL-licensed) font, timed proportionally across the voiceover
   - audio: the generated voiceover, optionally mixed with a royalty-free
@@ -73,6 +76,72 @@ def _render_caption_png(text, font_size=72, max_width=950):
     return np.array(img)
 
 
+def _fetch_pexels_clip(query, duration):
+    if not PEXELS_API_KEY:
+        return None
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/videos/search",
+            headers={"Authorization": PEXELS_API_KEY},
+            params={"query": query, "orientation": "portrait", "per_page": 5},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("videos", [])
+        if not results:
+            return None
+        video = random.choice(results)
+        files = sorted(video["video_files"], key=lambda f: f.get("width", 0))
+        portrait = [f for f in files if f.get("height", 0) > f.get("width", 0)]
+        pick = (portrait or files)[-1]
+
+        local_path = f"/tmp/pexels_bg_{abs(hash(query))}.mp4"
+        with requests.get(pick["link"], stream=True, timeout=30) as r:
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+        clip = VideoFileClip(local_path)
+        clip = clip.resize(height=H) if (clip.h / clip.w) > (H / W) else clip.resize(width=W)
+        clip = clip.crop(x_center=clip.w / 2, y_center=clip.h / 2, width=W, height=H)
+
+        if clip.duration < duration:
+            clip = concatenate_videoclips([clip] * math.ceil(duration / clip.duration))
+        clip = clip.subclip(0, duration)
+        clip = clip.fl_image(lambda frame: (frame * 0.55).astype("uint8"))  # darken for caption legibility
+        return clip
+    except Exception:
+        return None  # any failure here just falls back to the gradient for this segment — never crashes the run
+
+
+def _build_background_sequence(visual_queries, total_duration):
+    """
+    Cuts between a few relevant clips (one per visual query) instead of looping
+    a single clip for the whole video. Falls back to the synthetic gradient —
+    for the whole video if there's no Pexels key at all, or per-segment if a
+    specific clip can't be found — so a single failed lookup never breaks the run.
+    """
+    visual_queries = [q for q in (visual_queries or []) if q.strip()]
+
+    if not PEXELS_API_KEY or not visual_queries:
+        return _make_gradient_background(total_duration)
+
+    n = len(visual_queries)
+    seg_duration = total_duration / n
+    segments = []
+    accounted = 0.0
+    for i, query in enumerate(visual_queries):
+        this_duration = (total_duration - accounted) if i == n - 1 else seg_duration
+        clip = _fetch_pexels_clip(query, this_duration)
+        if clip is None:
+            clip = _make_gradient_background(this_duration)
+        segments.append(clip.resize((W, H)))
+        accounted += this_duration
+
+    return concatenate_videoclips(segments)
+
+
 def _make_gradient_background(duration, color_a=(20, 20, 45), color_b=(95, 20, 110)):
     """Fully synthetic animated diagonal gradient. No external assets, no licensing risk."""
     yy, xx = np.mgrid[0:H, 0:W]
@@ -91,52 +160,11 @@ def _make_gradient_background(duration, color_a=(20, 20, 45), color_b=(95, 20, 1
     return VideoClip(make_frame, duration=duration)
 
 
-def _fetch_pexels_clip(keyword, duration):
-    if not PEXELS_API_KEY:
-        return None
-    try:
-        resp = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers={"Authorization": PEXELS_API_KEY},
-            params={"query": keyword, "orientation": "portrait", "per_page": 5},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("videos", [])
-        if not results:
-            return None
-        video = random.choice(results)
-        files = sorted(video["video_files"], key=lambda f: f.get("width", 0))
-        portrait = [f for f in files if f.get("height", 0) > f.get("width", 0)]
-        pick = (portrait or files)[-1]
-
-        local_path = "/tmp/pexels_bg.mp4"
-        with requests.get(pick["link"], stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-        clip = VideoFileClip(local_path)
-        clip = clip.resize(height=H) if (clip.h / clip.w) > (H / W) else clip.resize(width=W)
-        clip = clip.crop(x_center=clip.w / 2, y_center=clip.h / 2, width=W, height=H)
-
-        if clip.duration < duration:
-            clip = concatenate_videoclips([clip] * math.ceil(duration / clip.duration))
-        clip = clip.subclip(0, duration)
-        clip = clip.fl_image(lambda frame: (frame * 0.55).astype("uint8"))  # darken for caption legibility
-        return clip
-    except Exception:
-        return None  # any failure here just falls back to the gradient — never crashes the run
-
-
-def build_video(script_text, audio_path, output_path, topic_keyword=""):
+def build_video(script_text, audio_path, output_path, visual_queries=None):
     voice = AudioFileClip(audio_path)
     duration = voice.duration + 2.0  # +2s for the outro card
 
-    background = _fetch_pexels_clip(topic_keyword, duration) if topic_keyword else None
-    if background is None:
-        background = _make_gradient_background(duration)
+    background = _build_background_sequence(visual_queries, duration)
     background = background.set_duration(duration).resize((W, H))
 
     phrases = _split_into_phrases(script_text)
@@ -177,6 +205,7 @@ if __name__ == "__main__":
     from generate_audio import generate_voiceover
 
     demo_script = "Scientists just discovered something surprising about deep ocean coral. The reef survived a heatwave that killed nearby colonies. Researchers think a unique algae partnership made the difference. This could help protect other reefs as oceans keep warming."
+    demo_queries = ["coral reef underwater", "ocean waves aerial", "marine biologist lab"]
     generate_voiceover(demo_script, "/tmp/demo_audio.mp3")
-    build_video(demo_script, "/tmp/demo_audio.mp3", "/tmp/demo_output.mp4")
+    build_video(demo_script, "/tmp/demo_audio.mp3", "/tmp/demo_output.mp4", visual_queries=demo_queries)
     print("Wrote /tmp/demo_output.mp4")
