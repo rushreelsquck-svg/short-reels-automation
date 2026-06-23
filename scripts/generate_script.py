@@ -28,11 +28,16 @@ Rules:
 - The script is spoken aloud, so write for the ear: short sentences, no headers, no bullet points.
 - Target 110-130 words (about 45-55 seconds at a natural reading pace).
 - The title must be accurate to the content — compelling is good, misleading is not.
+- Also pick 3-4 short, concrete, visually-literal phrases that a stock-footage search engine
+  could find real b-roll for (e.g. "oil refinery", "cargo ship at port", "diplomats shaking hands",
+  "stock market screen") — these become the background footage, cut together in order, so they
+  should roughly follow the story's beats. Never use abstract, non-visual, or text-only phrases
+  (e.g. not "economic policy" or "public reaction") — name the literal thing a camera would see.
 - Call the submit_video_package tool exactly once with the finished package."""
 
 PACKAGE_TOOL = {
     "name": "submit_video_package",
-    "description": "Submit the finished title, script, description, tags, and hashtags for this video.",
+    "description": "Submit the finished title, script, description, tags, hashtags, and background visual cues for this video.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -58,8 +63,13 @@ PACKAGE_TOOL = {
                 "items": {"type": "string"},
                 "description": "5-8 hashtags, each starting with #, relevant to this story; always include #shorts",
             },
+            "visual_queries": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "3-4 short (2-4 word) concrete, literal stock-footage search phrases for this story's background visuals, in story order",
+            },
         },
-        "required": ["title", "script", "description", "tags", "hashtags"],
+        "required": ["title", "script", "description", "tags", "hashtags", "visual_queries"],
     },
 }
 
