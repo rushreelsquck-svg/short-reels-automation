@@ -38,9 +38,17 @@ def _build_status_body():
 
 
 def _sanitize_tags(tags: list[str]) -> list[str]:
+    import unicodedata
     cleaned = []
     for tag in tags:
-        tag = re.sub(r'[<>&"\'\#]', '', tag).strip()
+        # Normalize unicode first — converts curly quotes, em-dashes etc
+        # to their ASCII equivalents before stripping
+        tag = unicodedata.normalize("NFKD", tag)
+        # Strip every character YouTube rejects in tags
+        tag = re.sub(r'[<>&"\'`\#\u2018\u2019\u201c\u201d\u2014\u2013\u2026]', '', tag)
+        # Strip any remaining non-ASCII characters as a catch-all
+        tag = re.sub(r'[^\x00-\x7F]', '', tag)
+        tag = tag.strip()
         if tag and len(tag) <= 100:
             cleaned.append(tag)
     return cleaned
